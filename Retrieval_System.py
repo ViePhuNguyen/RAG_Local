@@ -1,51 +1,35 @@
-
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain.schema import Document
-from typing import List, Optional
+from typing import List, Optional, Union, Tuple
 import torch
+import os
+from Embedding_Process import PhoBERTEmbeddings
 
 
 class RetrievalSystem:
-    def __init__(self, persist_dir: str = "chroma_db"):
-        # Khởi tạo embedding model
+    def __init__(self, persist_dir: str = "Data_Base_Vector"):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.embedder = HuggingFaceEmbeddings(
-            model_name="bkai-foundation-models/vietnamese-bi-encoder",
-            model_kwargs={"device": self.device}
-        )
 
-        # Kết nối ChromaDB
+        self.embedder = PhoBERTEmbeddings(device=self.device)
         try:
             self.vector_store = Chroma(
                 persist_directory=persist_dir,
-                embedding_function=self.embedder
+                embedding_function=self.embedder,
             )
         except Exception as e:
-            raise ValueError(f"Failed to load vector store: {str(e)}")
+            raise RuntimeError(f"Không thể kết nối ChromaDB: {str(e)}")
 
     def retrieve_documents(
             self,
             query: str,
             k: int = 5,
             score_threshold: Optional[float] = None
-    ) -> List[Document]:
-        """
-        Retrieve relevant documents with options
-
-        Args:
-            query: Câu truy vấn
-            k: Số lượng documents trả về
-            score_threshold: Ngưỡng similarity score (0-1)
-
-        Returns:
-            Danh sách documents kèm metadata
-        """
-        search_kwargs = {"k": k}
+    ) -> list[tuple[Document, float]]:
+        search_kwargs = {"k": min(k, 20)}
         if score_threshold:
-            search_kwargs["score_threshold"] = score_threshold
+            search_kwargs["score_threshold"] = max(0.0, min(1.0, score_threshold))
 
-        return self.vector_store.similarity_search(
+        return self.vector_store.similarity_search_with_score(
             query=query,
             **search_kwargs
         )
@@ -56,37 +40,24 @@ class RetrievalSystem:
             k: int = 5,
             diversity: float = 0.7
     ) -> List[Document]:
-        """
-        Maximal Marginal Relevance Retrieval
-
-        Args:
-            diversity: Mức độ đa dạng (0-1)
-                       0 = tương tự thuần túy, 1 = đa dạng tối đa
-        """
+        diversity = max(0.0, min(1.0, diversity))
         return self.vector_store.max_marginal_relevance_search(
             query=query,
-            k=k,
+            k=min(k, 20),
             lambda_mult=diversity
         )
 
 
-# if __name__ == "__main__":
-#     # Test retrieval system
-#     retriever = RetrievalSystem()
-#
-#     # Test query
-#     test_query = "Điều kiện xin học bổng USTH Ambassador?"
-#
-#     # Basic retrieval
-#     print("=== Similarity Search ===")
-#     results = retriever.retrieve_documents(test_query)
-#     for doc in results:
-#         print(f"Source: {doc.metadata['source']}")
-#         print(f"Content: {doc.page_content[:200]}...\n")
-#
-#     # MMR retrieval
-#     print("\n=== MMR Search ===")
-#     mmr_results = retriever.mmr_retrieve(test_query)
-#     for doc in mmr_results:
-#         print(f"Source: {doc.metadata['source']}")
-#         print(f"Content: {doc.page_content[:200]}...\n")
+if __name__ == "__main__":
+    try:
+        retriever = RetrievalSystem()
+        query = "Chuyên môn của cô Nghiêm Thị Phương (khoa ICT) là gì?"
+        results = retriever.retrieve_documents(query)
+
+        for doc, score in results:
+            print(f"\nScore: {score:.3f}")
+            print(f"Source: {doc.metadata['source']}")
+            print(f"Content: {doc.page_content[:200]}...")
+
+    except Exception as e:
+        print(f"Error: {str(e)}")
